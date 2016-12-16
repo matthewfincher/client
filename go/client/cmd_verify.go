@@ -48,6 +48,10 @@ func NewCmdVerify(cl *libcmdline.CommandLine, g *libkb.GlobalContext) cli.Comman
 				Name:  "S, signed-by",
 				Usage: "Assert signed by the given user (can use user assertion format).",
 			},
+			cli.BoolFlag{
+				Name:  "f, force",
+				Usage: "Output the verified message even if the sender's identity can't be verified",
+			},
 		},
 	}
 }
@@ -58,6 +62,7 @@ type CmdVerify struct {
 	detachedData []byte
 	signedBy     string
 	spui         *SaltpackUI
+	force        bool
 }
 
 func (c *CmdVerify) ParseArgv(ctx *cli.Context) error {
@@ -88,10 +93,12 @@ func (c *CmdVerify) ParseArgv(ctx *cli.Context) error {
 		c.detachedData = data
 	}
 
+	c.force = ctx.Bool("force")
+
 	return nil
 }
 
-func (c *CmdVerify) Run() (err error) {
+func (c *CmdVerify) Run() error {
 	cli, err := GetSaltpackClient(c.G())
 	if err != nil {
 		return err
@@ -100,6 +107,7 @@ func (c *CmdVerify) Run() (err error) {
 	c.spui = &SaltpackUI{
 		Contextified: libkb.NewContextified(c.G()),
 		terminal:     c.G().UI.GetTerminalUI(),
+		force:        c.force,
 	}
 
 	protocols := []rpc.Protocol{
@@ -113,19 +121,24 @@ func (c *CmdVerify) Run() (err error) {
 		return err
 	}
 	snk, src, err := c.ClientFilterOpen(c.G())
-	if err == nil {
-		arg := keybase1.SaltpackVerifyArg{
-			Source: src,
-			Sink:   snk,
-			Opts: keybase1.SaltpackVerifyOptions{
-				Signature: c.detachedData,
-				SignedBy:  c.signedBy,
-			},
-		}
-		err = cli.SaltpackVerify(context.TODO(), arg)
+	if err != nil {
+		return err
 	}
-	cerr := c.Close(err)
-	return libkb.PickFirstError(err, cerr)
+
+	arg := keybase1.SaltpackVerifyArg{
+		Source: src,
+		Sink:   snk,
+		Opts: keybase1.SaltpackVerifyOptions{
+			Signature: c.detachedData,
+			SignedBy:  c.signedBy,
+		},
+	}
+	err = cli.SaltpackVerify(context.TODO(), arg)
+	if err != nil {
+		return err
+	}
+
+	return c.Close(err)
 }
 
 func (c *CmdVerify) GetUsage() libkb.Usage {

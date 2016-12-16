@@ -24,15 +24,20 @@ func KeyLookupKID(g *GlobalContext, k keybase1.KID) (username string, uid keybas
 	return keyLookup(g, keyLookupArg{kid: k})
 }
 
+func KeyLookupKIDIncludingRevoked(g *GlobalContext, k keybase1.KID) (username string, uid keybase1.UID, err error) {
+	return keyLookup(g, keyLookupArg{kid: k, includeRevoked: true})
+}
+
 func KeyLookupByBoxPublicKey(g *GlobalContext, k saltpack.BoxPublicKey) (username string, uid keybase1.UID, err error) {
 	return keyLookup(g, keyLookupArg{kid: BoxPublicKeyToKeybaseKID(k)})
 }
 
 type keyLookupArg struct {
-	fp     *PGPFingerprint
-	hexID  string
-	uintID uint64
-	kid    keybase1.KID
+	fp             *PGPFingerprint
+	hexID          string
+	uintID         uint64
+	kid            keybase1.KID
+	includeRevoked bool
 }
 
 type keyBasicsReply struct {
@@ -47,6 +52,7 @@ func (k *keyBasicsReply) GetAppStatus() *AppStatus {
 
 func keyLookup(g *GlobalContext, arg keyLookupArg) (username string, uid keybase1.UID, err error) {
 	httpArgs := make(HTTPArgs)
+	httpArgs["include_revoked"] = B{Val: arg.includeRevoked}
 	switch {
 	case arg.fp != nil:
 		httpArgs["fingerprint"] = S{arg.fp.String()}
