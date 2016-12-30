@@ -46,6 +46,13 @@ func (i *Inbox) dbKey() libkb.DbKey {
 	}
 }
 
+func (i *Inbox) dbKeyQueries() libkb.DbKey {
+	return libkb.DbKey{
+		Typ: libkb.DBChatInbox,
+		Key: fmt.Sprintf("ibq:%s", i.uid),
+	}
+}
+
 func (i *Inbox) readDiskInbox() (inboxDiskData, libkb.ChatStorageError) {
 	var ibox inboxDiskData
 	found, err := i.readDiskBox(i.dbKey(), &ibox)

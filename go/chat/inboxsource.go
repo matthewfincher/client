@@ -206,39 +206,27 @@ func NewHybridInboxSource(g *libkb.GlobalContext, inbox *storage.Inbox, remote *
 	}
 }
 
-func (s *HybridInboxSource) isPaginationSafe(p *chat1.Pagination) bool {
-	return p == nil || (len(p.Next) == 0 && len(p.Previous) == 0 && p.Num >= 5)
-}
-
-func (s *HybridInboxSource) isSaveable(query *chat1.GetInboxLocalQuery, p *chat1.Pagination) bool {
-	// TODO: makethis work
-	return true
-}
-
 func (s *HybridInboxSource) Read(ctx context.Context, uid gregor1.UID, query *chat1.GetInboxLocalQuery,
 	p *chat1.Pagination) (Inbox, *chat1.RateLimit, error) {
 
 	// Try local storage
-	saveable := s.isSaveable(query, p)
-	if saveable {
-		vers, convsStorage, cerr := s.inbox.Read(query, p)
-		if cerr != nil {
-			if _, ok := cerr.(libkb.ChatStorageMissError); !ok {
-				s.G().Log.Error("HybridInboxSource: error fetch inbox locally: %s", cerr.Error())
-			}
-		} else {
-			convs := make([]chat1.ConversationLocal, 0, len(convsStorage))
-			for _, cs := range convsStorage {
-				convs = append(convs, cs)
-			}
-			s.G().Log.Debug("HybridInboxSource: hit local storage: uid: %s convs: %d", uid, len(convs))
-			// TODO: pagination
-			return Inbox{
-				Version:    vers,
-				Convs:      convs,
-				Pagination: nil,
-			}, nil, nil
+	vers, convsStorage, cerr := s.inbox.Read(query, p)
+	if cerr != nil {
+		if _, ok := cerr.(libkb.ChatStorageMissError); !ok {
+			s.G().Log.Error("HybridInboxSource: error fetch inbox locally: %s", cerr.Error())
 		}
+	} else {
+		convs := make([]chat1.ConversationLocal, 0, len(convsStorage))
+		for _, cs := range convsStorage {
+			convs = append(convs, cs)
+		}
+		s.G().Log.Debug("HybridInboxSource: hit local storage: uid: %s convs: %d", uid, len(convs))
+		// TODO: pagination
+		return Inbox{
+			Version:    vers,
+			Convs:      convs,
+			Pagination: nil,
+		}, nil, nil
 	}
 
 	// Go to the remote on miss
@@ -248,10 +236,8 @@ func (s *HybridInboxSource) Read(ctx context.Context, uid gregor1.UID, query *ch
 	}
 
 	// Write out to local storage
-	if saveable {
-		if cerr := s.inbox.Replace(ib.Version, ib.Convs); cerr != nil {
-			return Inbox{}, rl, cerr
-		}
+	if cerr := s.inbox.Replace(ib.Version, ib.Convs); cerr != nil {
+		return Inbox{}, rl, cerr
 	}
 
 	return ib, rl, nil
