@@ -6,17 +6,49 @@ import (
 
 	"time"
 
+	"bytes"
+
+	"sort"
+
 	"github.com/keybase/client/go/libkb"
 	"github.com/keybase/client/go/protocol/chat1"
 	"github.com/keybase/client/go/protocol/gregor1"
 )
 
-const inboxVersion = 1
+const inboxVersion = 2
+
+type inboxDiskQuery struct {
+	Query      *chat1.GetInboxLocalQuery `codec:"Q"`
+	Pagination *chat1.Pagination         `codec:"P"`
+}
+
+func (q inboxDiskQuery) queryMatch(other inboxDiskQuery) bool {
+	if q.Query == nil && other.Query == nil {
+		return true
+	} else if q.Query != nil && other.Query != nil {
+		return q.Query.Eq(*other.Query)
+	}
+	return false
+}
+
+func (q inboxDiskQuery) paginationMatch(other inboxDiskQuery) bool {
+	if q.Pagination == nil && other.Pagination == nil {
+		return true
+	} else if q.Pagination != nil && other.Pagination != nil {
+		return q.Pagination.Eq(*other.Pagination)
+	}
+	return false
+}
+
+func (q inboxDiskQuery) match(other inboxDiskQuery) bool {
+	return q.queryMatch(other) && q.paginationMatch(other)
+}
 
 type inboxDiskData struct {
 	Version       int                       `codec:"V"`
 	InboxVersion  chat1.InboxVers           `codec:"I"`
 	Conversations []chat1.ConversationLocal `codec:"C"`
+	Queries       []inboxDiskQuery          `codec:"Q"`
 }
 
 type Inbox struct {
@@ -79,16 +111,71 @@ func (i *Inbox) writeDiskInbox(ibox inboxDiskData) libkb.ChatStorageError {
 	return nil
 }
 
-func (i *Inbox) Replace(vers chat1.InboxVers, convs []chat1.ConversationLocal) libkb.ChatStorageError {
+type ByDatabaseOrder []chat1.ConversationLocal
+
+func (a ByDatabaseOrder) Len() int      { return len(a) }
+func (a ByDatabaseOrder) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
+func (a ByDatabaseOrder) Less(i, j int) bool {
+	if a[i].ReaderInfo.Mtime < a[j].ReaderInfo.Mtime {
+		return true
+	} else if a[i].ReaderInfo.Mtime > a[j].ReaderInfo.Mtime {
+		return false
+	}
+	return bytes.Compare(a[i].Info.Id, a[j].Info.Id) < 0
+}
+
+func (i *Inbox) mergeConvs(l []chat1.ConversationLocal, r []chat1.ConversationLocal) (res []chat1.ConversationLocal) {
+	m := make(map[string]bool)
+	for _, conv := range l {
+		m[conv.Info.Id.String()] = true
+		res = append(res, conv)
+	}
+	for _, conv := range r {
+		if !m[conv.Info.Id.String()] {
+			res = append(res, conv)
+		}
+	}
+	sort.Sort(ByDatabaseOrder(res))
+	return res
+}
+
+func (i *Inbox) Merge(vers chat1.InboxVers, convs []chat1.ConversationLocal,
+	query *chat1.GetInboxLocalQuery, p *chat1.Pagination) libkb.ChatStorageError {
 	i.Lock()
 	defer i.Unlock()
 
-	i.debug("Replace: vers: %d", vers)
-	data := inboxDiskData{
-		Version:       inboxVersion,
-		InboxVersion:  vers,
-		Conversations: convs,
+	i.debug("Merge: vers: %d", vers)
+
+	// Read inbox off disk to determine if we can merge, or need to full replace
+	ibox, err := i.readDiskInbox()
+	if err != nil {
+		if _, ok := err.(libkb.ChatStorageMissError); !ok {
+			return err
+		}
 	}
+
+	// Replace the inbox under these conditions
+	qp := inboxDiskQuery{Query: query, Pagination: p}
+	var data inboxDiskData
+	if ibox.InboxVersion != vers || err != nil {
+		i.debug("Merge: replacing inbox: ibox.vers: %v vers: %v", ibox.InboxVersion, vers)
+		data = inboxDiskData{
+			Version:       inboxVersion,
+			InboxVersion:  vers,
+			Conversations: convs,
+			Queries:       []inboxDiskQuery{qp},
+		}
+	} else {
+		i.debug("Merge: merging inbox: version match")
+		data = inboxDiskData{
+			Version:       inboxVersion,
+			InboxVersion:  vers,
+			Conversations: i.mergeConvs(convs, ibox.Conversations),
+			Queries:       append(ibox.Queries, qp),
+		}
+	}
+
+	// Write out new inbox
 	if err := i.writeDiskInbox(data); err != nil {
 		return err
 	}
@@ -131,6 +218,16 @@ func (i *Inbox) applyQuery(query *chat1.GetInboxLocalQuery, convs []chat1.Conver
 	return res
 }
 
+func (i *Inbox) queryExists(ibox inboxDiskData, query *chat1.GetInboxLocalQuery,
+	p *chat1.Pagination) bool {
+	for _, q := range ibox.Queries {
+		if q.match(inboxDiskQuery{Query: query, Pagination: p}) {
+			return true
+		}
+	}
+	return false
+}
+
 func (i *Inbox) Read(query *chat1.GetInboxLocalQuery, p *chat1.Pagination) (chat1.InboxVers, []chat1.ConversationLocal, libkb.ChatStorageError) {
 	i.Lock()
 	defer i.Unlock()
@@ -140,6 +237,11 @@ func (i *Inbox) Read(query *chat1.GetInboxLocalQuery, p *chat1.Pagination) (chat
 		return 0, nil, err
 	}
 
+	// Check to make sure query parameters have been seen before
+	if !i.queryExists(ibox, query, p) {
+		i.debug("Read: miss: query or pagination unknown")
+		return 0, nil, libkb.ChatStorageMissError{}
+	}
 	ibox.Conversations = i.applyQuery(query, ibox.Conversations)
 	// TODO pagination
 

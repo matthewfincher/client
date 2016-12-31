@@ -236,7 +236,7 @@ func (s *HybridInboxSource) Read(ctx context.Context, uid gregor1.UID, query *ch
 	}
 
 	// Write out to local storage
-	if cerr := s.inbox.Replace(ib.Version, ib.Convs); cerr != nil {
+	if cerr := s.inbox.Merge(ib.Version, ib.Convs, query, p); cerr != nil {
 		return Inbox{}, rl, cerr
 	}
 
