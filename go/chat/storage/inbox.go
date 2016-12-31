@@ -22,15 +22,15 @@ import (
 const inboxVersion = 2
 
 type inboxDiskQuery struct {
-	QueryHash  *string           `codec:"Q"`
+	QueryHash  string            `codec:"Q"`
 	Pagination *chat1.Pagination `codec:"P"`
 }
 
 func (q inboxDiskQuery) queryMatch(other inboxDiskQuery) bool {
-	if q.QueryHash == nil && other.QueryHash == nil {
+	if q.QueryHash == "" && other.QueryHash == "" {
 		return true
-	} else if q.QueryHash != nil && other.QueryHash != nil {
-		return *q.QueryHash == *other.QueryHash
+	} else if q.QueryHash != "" && other.QueryHash != "" {
+		return q.QueryHash == other.QueryHash
 	}
 	return false
 }
@@ -143,20 +143,19 @@ func (i *Inbox) mergeConvs(l []chat1.ConversationLocal, r []chat1.ConversationLo
 	return res
 }
 
-func (i *Inbox) hashQuery(query *chat1.GetInboxLocalQuery) (*string, libkb.ChatStorageError) {
+func (i *Inbox) hashQuery(query *chat1.GetInboxLocalQuery) (string, libkb.ChatStorageError) {
 	if query == nil {
-		return nil, nil
+		return "", nil
 	}
 
 	dat, err := encode(*query)
 	if err != nil {
-		return nil, libkb.NewChatStorageInternalError(i.G(), "failed to encode query: %s", err.Error())
+		return "", libkb.NewChatStorageInternalError(i.G(), "failed to encode query: %s", err.Error())
 	}
 
 	hasher := sha1.New()
 	hasher.Write(dat)
-	res := base64.URLEncoding.EncodeToString(hasher.Sum(nil))
-	return &res, nil
+	return base64.URLEncoding.EncodeToString(hasher.Sum(nil)), nil
 }
 
 func (i *Inbox) Merge(vers chat1.InboxVers, convs []chat1.ConversationLocal,

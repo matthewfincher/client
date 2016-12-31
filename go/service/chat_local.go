@@ -188,11 +188,14 @@ func (h *chatLocalHandler) GetInboxAndUnboxLocal(ctx context.Context, arg chat1.
 		return chat1.GetInboxAndUnboxLocalRes{}, libkb.LoginRequiredError{}
 	}
 
-	// Create inbox source
 	var identBreaks []keybase1.TLFIdentifyFailure
 	ctx = chat.Context(ctx, arg.IdentifyBehavior, &identBreaks, h.identNotifier)
-	inbox := chat.NewRemoteInboxSource(h.G(), h.boxer, h.remoteClient,
+
+	// Create inbox source
+	remoteInbox := chat.NewRemoteInboxSource(h.G(), h.boxer, h.remoteClient,
 		func() keybase1.TlfInterface { return h.tlf })
+	diskInbox := storage.NewInbox(h.G(), uid.ToBytes(), h.getSecretUI)
+	inbox := chat.NewHybridInboxSource(h.G(), diskInbox, remoteInbox)
 
 	// Read inbox from the source
 	ib, rl, err := inbox.Read(ctx, uid.ToBytes(), arg.Query, arg.Pagination)
