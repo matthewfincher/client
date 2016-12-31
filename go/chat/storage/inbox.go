@@ -120,12 +120,12 @@ type ByDatabaseOrder []chat1.ConversationLocal
 func (a ByDatabaseOrder) Len() int      { return len(a) }
 func (a ByDatabaseOrder) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
 func (a ByDatabaseOrder) Less(i, j int) bool {
-	if a[i].ReaderInfo.Mtime < a[j].ReaderInfo.Mtime {
+	if a[i].ReaderInfo.Mtime > a[j].ReaderInfo.Mtime {
 		return true
-	} else if a[i].ReaderInfo.Mtime > a[j].ReaderInfo.Mtime {
+	} else if a[i].ReaderInfo.Mtime < a[j].ReaderInfo.Mtime {
 		return false
 	}
-	return bytes.Compare(a[i].Info.Id, a[j].Info.Id) < 0
+	return bytes.Compare(a[i].Info.Id, a[j].Info.Id) > 0
 }
 
 func (i *Inbox) mergeConvs(l []chat1.ConversationLocal, r []chat1.ConversationLocal) (res []chat1.ConversationLocal) {
