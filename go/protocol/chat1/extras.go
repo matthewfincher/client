@@ -221,10 +221,6 @@ func (q *GetInboxQuery) Visibility() TLFVisibility {
 	return visibility
 }
 
-func (q GetInboxLocalQuery) Eq(other GetInboxLocalQuery) bool {
-	return false
-}
-
 func (p Pagination) Eq(other Pagination) bool {
 	return p.Last == other.Last && bytes.Equal(p.Next, other.Next) &&
 		bytes.Equal(p.Previous, other.Previous) && p.Num == other.Num

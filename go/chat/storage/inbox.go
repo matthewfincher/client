@@ -10,6 +10,10 @@ import (
 
 	"sort"
 
+	"crypto/sha1"
+
+	"encoding/base64"
+
 	"github.com/keybase/client/go/libkb"
 	"github.com/keybase/client/go/protocol/chat1"
 	"github.com/keybase/client/go/protocol/gregor1"
@@ -18,15 +22,15 @@ import (
 const inboxVersion = 2
 
 type inboxDiskQuery struct {
-	Query      *chat1.GetInboxLocalQuery `codec:"Q"`
-	Pagination *chat1.Pagination         `codec:"P"`
+	QueryHash  *string           `codec:"Q"`
+	Pagination *chat1.Pagination `codec:"P"`
 }
 
 func (q inboxDiskQuery) queryMatch(other inboxDiskQuery) bool {
-	if q.Query == nil && other.Query == nil {
+	if q.QueryHash == nil && other.QueryHash == nil {
 		return true
-	} else if q.Query != nil && other.Query != nil {
-		return q.Query.Eq(*other.Query)
+	} else if q.QueryHash != nil && other.QueryHash != nil {
+		return *q.QueryHash == *other.QueryHash
 	}
 	return false
 }
@@ -139,6 +143,22 @@ func (i *Inbox) mergeConvs(l []chat1.ConversationLocal, r []chat1.ConversationLo
 	return res
 }
 
+func (i *Inbox) hashQuery(query *chat1.GetInboxLocalQuery) (*string, libkb.ChatStorageError) {
+	if query == nil {
+		return nil, nil
+	}
+
+	dat, err := encode(*query)
+	if err != nil {
+		return nil, libkb.NewChatStorageInternalError(i.G(), "failed to encode query: %s", err.Error())
+	}
+
+	hasher := sha1.New()
+	hasher.Write(dat)
+	res := base64.URLEncoding.EncodeToString(hasher.Sum(nil))
+	return &res, nil
+}
+
 func (i *Inbox) Merge(vers chat1.InboxVers, convs []chat1.ConversationLocal,
 	query *chat1.GetInboxLocalQuery, p *chat1.Pagination) libkb.ChatStorageError {
 	i.Lock()
@@ -154,9 +174,16 @@ func (i *Inbox) Merge(vers chat1.InboxVers, convs []chat1.ConversationLocal,
 		}
 	}
 
-	// Replace the inbox under these conditions
-	qp := inboxDiskQuery{Query: query, Pagination: p}
+	// Set up query stuff
+	hquery, err := i.hashQuery(query)
+	if err != nil {
+		return err
+	}
+	i.debug("Merge: query hash: %s", hquery)
+	qp := inboxDiskQuery{QueryHash: hquery, Pagination: p}
 	var data inboxDiskData
+
+	// Replace the inbox under these conditions
 	if ibox.InboxVersion != vers || err != nil {
 		i.debug("Merge: replacing inbox: ibox.vers: %v vers: %v", ibox.InboxVersion, vers)
 		data = inboxDiskData{
@@ -220,8 +247,17 @@ func (i *Inbox) applyQuery(query *chat1.GetInboxLocalQuery, convs []chat1.Conver
 
 func (i *Inbox) queryExists(ibox inboxDiskData, query *chat1.GetInboxLocalQuery,
 	p *chat1.Pagination) bool {
+
+	hquery, err := i.hashQuery(query)
+	if err != nil {
+		i.debug("Read: queryExists: error hashing query: %s", err.Error())
+		return false
+	}
+	i.debug("Read: queryExists: query hash: %s", hquery)
+
+	qp := inboxDiskQuery{QueryHash: hquery, Pagination: p}
 	for _, q := range ibox.Queries {
-		if q.match(inboxDiskQuery{Query: query, Pagination: p}) {
+		if q.match(qp) {
 			return true
 		}
 	}
