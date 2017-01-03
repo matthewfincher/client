@@ -12,6 +12,14 @@ type InboxPagerFields struct {
 	ConvID chat1.ConversationID `codec:"C"`
 }
 
+func (i InboxPagerFields) GetMtime() gregor1.Time {
+	return i.Mtime
+}
+
+func (i InboxPagerFields) GetConvID() chat1.ConversationID {
+	return i.ConvID
+}
+
 // pager provides the getPage and makePage functions for implementing
 // paging in the chat1 protocol
 type Pager struct {

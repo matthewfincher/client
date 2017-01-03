@@ -132,26 +132,19 @@ func (i *Inbox) writeDiskInbox(ibox inboxDiskData) libkb.ChatStorageError {
 
 type ByDatabaseOrder []chat1.ConversationLocal
 
-func dbConvLess(a pager.InboxPagerFields, b pager.InboxPagerFields) bool {
-	if a.Mtime > b.Mtime {
+func dbConvLess(a pager.InboxEntry, b pager.InboxEntry) bool {
+	if a.GetMtime() > b.GetMtime() {
 		return true
-	} else if a.Mtime < b.Mtime {
+	} else if a.GetMtime() < b.GetMtime() {
 		return false
 	}
-	return bytes.Compare(a.ConvID, b.ConvID) > 0
-}
-
-func exportConvLocal(c chat1.ConversationLocal) pager.InboxPagerFields {
-	return pager.InboxPagerFields{
-		Mtime:  c.ReaderInfo.Mtime,
-		ConvID: c.Info.Id,
-	}
+	return bytes.Compare(a.GetConvID(), b.GetConvID()) > 0
 }
 
 func (a ByDatabaseOrder) Len() int      { return len(a) }
 func (a ByDatabaseOrder) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
 func (a ByDatabaseOrder) Less(i, j int) bool {
-	return dbConvLess(exportConvLocal(a[i]), exportConvLocal(a[j]))
+	return dbConvLess(a[i], a[j])
 }
 
 func (i *Inbox) mergeConvs(l []chat1.ConversationLocal, r []chat1.ConversationLocal) (res []chat1.ConversationLocal) {
@@ -241,6 +234,8 @@ func (i *Inbox) applyQuery(query *chat1.GetInboxLocalQuery, convs []chat1.Conver
 	var res []chat1.ConversationLocal
 	for _, conv := range convs {
 		ok := true
+
+		// Basic checks
 		if query.ConvID != nil && !query.ConvID.Eq(conv.Info.Id) {
 			ok = false
 		}
@@ -268,6 +263,8 @@ func (i *Inbox) applyQuery(query *chat1.GetInboxLocalQuery, convs []chat1.Conver
 		if query.ReadOnly && conv.ReaderInfo.ReadMsgid < conv.ReaderInfo.MaxMsgid {
 			ok = false
 		}
+
+		// Check to see if the conv status is in the query list
 		if len(query.Status) > 0 {
 			found := false
 			for _, s := range query.Status {
@@ -280,6 +277,8 @@ func (i *Inbox) applyQuery(query *chat1.GetInboxLocalQuery, convs []chat1.Conver
 				ok = false
 			}
 		}
+
+		// If we are finalized and are superseded, then don't return this
 		if query.OneChatTypePerTLF == nil ||
 			(query.OneChatTypePerTLF != nil && *query.OneChatTypePerTLF) {
 			if conv.Info.FinalizeInfo != nil && len(conv.SupersededBy) > 0 {
@@ -328,11 +327,11 @@ func (i *Inbox) applyPagination(convs []chat1.ConversationLocal, p *chat1.Pagina
 		}
 
 		if hasnext {
-			if dbConvLess(exportConvLocal(conv), pnext) {
+			if dbConvLess(conv, pnext) {
 				res = append(res, conv)
 			}
 		} else if hasprev {
-			if dbConvLess(pprev, exportConvLocal(conv)) {
+			if dbConvLess(pprev, conv) {
 				res = append(res, conv)
 			}
 		} else {
@@ -590,18 +589,14 @@ func (i *Inbox) SetStatus(vers chat1.InboxVers, convID chat1.ConversationID, sta
 	}
 
 	// Find conversation
-	index, conv := i.getConv(convID, ibox.Conversations)
+	_, conv := i.getConv(convID, ibox.Conversations)
 	if conv == nil {
 		i.debug("SetStatus: no conversation found: convID: %s, clearing", convID)
 		return i.clear()
 	}
 
-	// Update conv
-	if status == chat1.ConversationStatus_IGNORED || status == chat1.ConversationStatus_BLOCKED {
-		// Remove conv
-		ibox.Conversations = append(ibox.Conversations[:index], ibox.Conversations[index+1:]...)
-	}
 	conv.ReaderInfo.Mtime = gregor1.ToTime(time.Now())
+	conv.Info.Status = status
 
 	// Write out to disk
 	ibox.InboxVersion = vers
