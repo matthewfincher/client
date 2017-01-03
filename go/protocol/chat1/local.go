@@ -562,8 +562,14 @@ type ConversationInfoLocal struct {
 	FinalizeInfo *ConversationFinalizeInfo `codec:"finalizeInfo,omitempty" json:"finalizeInfo,omitempty"`
 }
 
+type ConversationErrorLocal struct {
+	Message    string       `codec:"message" json:"message"`
+	RemoteConv Conversation `codec:"remoteConv" json:"remoteConv"`
+	Permanent  bool         `codec:"permanent" json:"permanent"`
+}
+
 type ConversationLocal struct {
-	Error            *string                       `codec:"error,omitempty" json:"error,omitempty"`
+	Error            *ConversationErrorLocal       `codec:"error,omitempty" json:"error,omitempty"`
 	Info             ConversationInfoLocal         `codec:"info" json:"info"`
 	ReaderInfo       ConversationReaderInfo        `codec:"readerInfo" json:"readerInfo"`
 	Supersedes       []ConversationID              `codec:"supersedes" json:"supersedes"`

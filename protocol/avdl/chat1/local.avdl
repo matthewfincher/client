@@ -190,11 +190,17 @@ protocol local {
     union { null, ConversationFinalizeInfo } finalizeInfo;
   }
 
+  record ConversationErrorLocal {
+    string message;
+    Conversation remoteConv;
+    boolean permanent;
+  }
+
   // ConversationLocal, whenever present, has a valid `identifyFailures` field that
   // faithfully represent identify result. If identify information is not
   // availabe, we should use a different type.
   record ConversationLocal {
-    union { null, string } error;
+    union { null, ConversationErrorLocal } error;
     ConversationInfoLocal info;
     ConversationReaderInfo readerInfo;
     array<ConversationID> supersedes;

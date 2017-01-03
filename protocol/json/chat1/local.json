@@ -574,12 +574,30 @@
     },
     {
       "type": "record",
+      "name": "ConversationErrorLocal",
+      "fields": [
+        {
+          "type": "string",
+          "name": "message"
+        },
+        {
+          "type": "Conversation",
+          "name": "remoteConv"
+        },
+        {
+          "type": "boolean",
+          "name": "permanent"
+        }
+      ]
+    },
+    {
+      "type": "record",
       "name": "ConversationLocal",
       "fields": [
         {
           "type": [
             null,
-            "string"
+            "ConversationErrorLocal"
           ],
           "name": "error"
         },

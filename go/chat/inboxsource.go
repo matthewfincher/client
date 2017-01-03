@@ -288,7 +288,7 @@ func (s *localizer) localizeConversationsPipeline(ctx context.Context, uid grego
 				if localizeCb != nil {
 					if convLocal.Error != nil {
 						*localizeCb <- NonblockInboxResult{
-							Err:    errors.New(*convLocal.Error),
+							Err:    errors.New(convLocal.Error.Message),
 							ConvID: conv.conv.Metadata.ConversationID,
 						}
 					} else {
@@ -316,6 +316,17 @@ func (s *localizer) localizeConversationsPipeline(ctx context.Context, uid grego
 	return res, nil
 }
 
+func (s *localizer) needsCanonicalize(name string) bool {
+	return strings.Contains(name, "@") || strings.Contains(name, ":")
+}
+
+func (s *localizer) isErrPermanent(err error) bool {
+	if uberr, ok := err.(libkb.ChatUnboxingError); ok {
+		return uberr.IsPermanent()
+	}
+	return false
+}
+
 func (s *localizer) localizeConversation(ctx context.Context, uid gregor1.UID,
 	conversationRemote chat1.Conversation) (conversationLocal chat1.ConversationLocal) {
 
@@ -327,7 +338,11 @@ func (s *localizer) localizeConversation(ctx context.Context, uid gregor1.UID,
 	}
 	if len(conversationRemote.MaxMsgs) == 0 {
 		errMsg := "conversation has an empty MaxMsgs field"
-		return chat1.ConversationLocal{Error: &errMsg}
+		return chat1.ConversationLocal{Error: &chat1.ConversationErrorLocal{
+			Message:    errMsg,
+			RemoteConv: conversationRemote,
+			Permanent:  false,
+		}}
 	}
 
 	var msgIDs []chat1.MessageID
@@ -339,13 +354,20 @@ func (s *localizer) localizeConversation(ctx context.Context, uid gregor1.UID,
 	conversationLocal.MaxMessages, err = s.G().ConvSource.GetMessages(ctx,
 		conversationRemote.Metadata.ConversationID, uid, msgIDs)
 	if err != nil {
-		errMsg := err.Error()
-		return chat1.ConversationLocal{Error: &errMsg}
+		return chat1.ConversationLocal{Error: &chat1.ConversationErrorLocal{
+			Message:    err.Error(),
+			RemoteConv: conversationRemote,
+			Permanent:  s.isErrPermanent(err),
+		}}
 	}
 
 	if conversationRemote.ReaderInfo == nil {
 		errMsg := "empty ReaderInfo from server?"
-		return chat1.ConversationLocal{Error: &errMsg}
+		return chat1.ConversationLocal{Error: &chat1.ConversationErrorLocal{
+			Message:    errMsg,
+			RemoteConv: conversationRemote,
+			Permanent:  false,
+		}}
 	}
 	conversationLocal.ReaderInfo = *conversationRemote.ReaderInfo
 	conversationLocal.Info.FinalizeInfo = conversationRemote.Metadata.FinalizeInfo
@@ -365,8 +387,8 @@ func (s *localizer) localizeConversation(ctx context.Context, uid gregor1.UID,
 			body := mm.Valid().MessageBody
 			typ, err := body.MessageType()
 			if err != nil {
-				s.G().Log.Debug("localizeConversation: skipping max message: %d, no message type",
-					mm.GetMessageID())
+				s.G().Log.Debug("localizeConversation: failed to get message type: convID: %s id: %d",
+					conversationRemote.Metadata.ConversationID, mm.GetMessageID())
 				continue
 			}
 			if typ == chat1.MessageType_METADATA {
@@ -386,22 +408,34 @@ func (s *localizer) localizeConversation(ctx context.Context, uid gregor1.UID,
 
 	if len(conversationLocal.Info.TlfName) == 0 {
 		errMsg := "no valid message in the conversation"
-		return chat1.ConversationLocal{Error: &errMsg}
+		return chat1.ConversationLocal{Error: &chat1.ConversationErrorLocal{
+			Message:    errMsg,
+			RemoteConv: conversationRemote,
+			Permanent:  false,
+		}}
 	}
 
 	// Verify ConversationID is derivable from ConversationIDTriple
 	if !conversationLocal.Info.Triple.Derivable(conversationLocal.Info.Id) {
 		errMsg := fmt.Sprintf("unexpected response from server: conversation ID is not derivable from conversation triple. triple: %#+v; Id: %x",
 			conversationLocal.Info.Triple, conversationLocal.Info.Id)
-		return chat1.ConversationLocal{Error: &errMsg}
+		return chat1.ConversationLocal{Error: &chat1.ConversationErrorLocal{
+			Message:    errMsg,
+			RemoteConv: conversationRemote,
+			Permanent:  false,
+		}}
 	}
 
 	// Only do this check if there is a chance the TLF name might be an SBS name.
-	if strings.Contains(conversationLocal.Info.TlfName, "@") {
+	if s.needsCanonicalize(conversationLocal.Info.TlfName) {
 		info, err := LookupTLF(ctx, s.getTlfInterface(), conversationLocal.Info.TlfName, conversationLocal.Info.Visibility)
 		if err != nil {
 			errMsg := err.Error()
-			return chat1.ConversationLocal{Error: &errMsg}
+			return chat1.ConversationLocal{Error: &chat1.ConversationErrorLocal{
+				Message:    errMsg,
+				RemoteConv: conversationRemote,
+				Permanent:  s.isErrPermanent(err),
+			}}
 		}
 		// Not sure about the utility of this TlfName assignment, but the previous code did this:
 		conversationLocal.Info.TlfName = info.CanonicalName
@@ -414,13 +448,21 @@ func (s *localizer) localizeConversation(ctx context.Context, uid gregor1.UID,
 		conversationRemote.Metadata.ActiveList)
 	if err != nil {
 		errMsg := fmt.Sprintf("error reordering participants: %v", err.Error())
-		return chat1.ConversationLocal{Error: &errMsg}
+		return chat1.ConversationLocal{Error: &chat1.ConversationErrorLocal{
+			Message:    errMsg,
+			RemoteConv: conversationRemote,
+			Permanent:  s.isErrPermanent(err),
+		}}
 	}
 
 	// verify Conv matches ConversationIDTriple in MessageClientHeader
 	if !conversationRemote.Metadata.IdTriple.Eq(conversationLocal.Info.Triple) {
 		errMsg := "server header conversation triple does not match client header triple"
-		return chat1.ConversationLocal{Error: &errMsg}
+		return chat1.ConversationLocal{Error: &chat1.ConversationErrorLocal{
+			Message:    errMsg,
+			RemoteConv: conversationRemote,
+			Permanent:  false,
+		}}
 	}
 
 	return conversationLocal

@@ -354,7 +354,7 @@ func (h *chatLocalHandler) NewConversationLocal(ctx context.Context, arg chat1.N
 		}
 
 		if res.Conv.Error != nil {
-			return chat1.NewConversationLocalRes{}, errors.New(*res.Conv.Error)
+			return chat1.NewConversationLocalRes{}, errors.New(res.Conv.Error.Message)
 		}
 
 		res.IdentifyFailures = identBreaks

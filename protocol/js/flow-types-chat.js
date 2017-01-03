@@ -535,6 +535,12 @@ export type Conversation = {
   maxMsgs?: ?Array<MessageBoxed>,
 }
 
+export type ConversationErrorLocal = {
+  message: string,
+  remoteConv: Conversation,
+  permanent: boolean,
+}
+
 export type ConversationFinalizeInfo = {
   resetUser: string,
   resetDate: string,
@@ -562,7 +568,7 @@ export type ConversationInfoLocal = {
 }
 
 export type ConversationLocal = {
-  error?: ?string,
+  error?: ?ConversationErrorLocal,
   info: ConversationInfoLocal,
   readerInfo: ConversationReaderInfo,
   supersedes?: ?Array<ConversationID>,
