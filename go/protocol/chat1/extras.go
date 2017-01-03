@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strconv"
+
+	"github.com/keybase/client/go/protocol/gregor1"
 )
 
 // Eq compares two TLFIDs
@@ -224,4 +226,12 @@ func (q *GetInboxQuery) Visibility() TLFVisibility {
 func (p Pagination) Eq(other Pagination) bool {
 	return p.Last == other.Last && bytes.Equal(p.Next, other.Next) &&
 		bytes.Equal(p.Previous, other.Previous) && p.Num == other.Num
+}
+
+func (c ConversationLocal) GetMtime() gregor1.Time {
+	return c.ReaderInfo.Mtime
+}
+
+func (c ConversationLocal) GetConvID() ConversationID {
+	return c.Info.Id
 }

@@ -194,8 +194,9 @@ func (s *NonblockRemoteInboxSource) Read(ctx context.Context, uid gregor1.UID,
 type HybridInboxSource struct {
 	libkb.Contextified
 
-	remote *RemoteInboxSource
-	inbox  *storage.Inbox
+	remote    *RemoteInboxSource
+	inbox     *storage.Inbox
+	localizer *localizer
 }
 
 func NewHybridInboxSource(g *libkb.GlobalContext, inbox *storage.Inbox, remote *RemoteInboxSource) *HybridInboxSource {
@@ -203,29 +204,63 @@ func NewHybridInboxSource(g *libkb.GlobalContext, inbox *storage.Inbox, remote *
 		Contextified: libkb.NewContextified(g),
 		remote:       remote,
 		inbox:        inbox,
+		localizer:    newLocalizer(g, remote.getTlfInterface),
 	}
+}
+
+func (s *HybridInboxSource) finalizeConvs(ctx context.Context, uid gregor1.UID,
+	convs []chat1.ConversationLocal) (res []chat1.ConversationLocal, err error) {
+
+	// Gather up non-permanent errors
+	var convErrs []chat1.Conversation
+	for _, conv := range convs {
+		if conv.Error != nil && !conv.Error.Permanent {
+			convErrs = append(convErrs, conv.Error.RemoteConv)
+		}
+	}
+
+	// Localize them
+	s.G().Log.Debug("HybridInboxSource: finalizing %d conversations", len(convErrs))
+	convLocals, err := s.localizer.localizeConversationsPipeline(ctx, uid, convErrs, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Form final result
+	m := make(map[string]chat1.ConversationLocal)
+	for _, conv := range convLocals {
+		m[conv.Info.Id.String()] = conv
+	}
+	for _, conv := range convs {
+		if conv.Error != nil && !conv.Error.Permanent {
+			res = append(res, m[conv.Info.Id.String()])
+		} else {
+			res = append(res, conv)
+		}
+	}
+
+	return res, nil
 }
 
 func (s *HybridInboxSource) Read(ctx context.Context, uid gregor1.UID, query *chat1.GetInboxLocalQuery,
 	p *chat1.Pagination) (Inbox, *chat1.RateLimit, error) {
 
 	// Try local storage
-	vers, convsStorage, cerr := s.inbox.Read(query, p)
+	vers, convs, pagination, cerr := s.inbox.Read(query, p)
 	if cerr != nil {
 		if _, ok := cerr.(libkb.ChatStorageMissError); !ok {
 			s.G().Log.Error("HybridInboxSource: error fetch inbox locally: %s", cerr.Error())
 		}
 	} else {
-		convs := make([]chat1.ConversationLocal, 0, len(convsStorage))
-		for _, cs := range convsStorage {
-			convs = append(convs, cs)
-		}
 		s.G().Log.Debug("HybridInboxSource: hit local storage: uid: %s convs: %d", uid, len(convs))
-		// TODO: pagination
+		finalConvs, err := s.finalizeConvs(ctx, uid, convs)
+		if err != nil {
+			return Inbox{}, nil, err
+		}
 		return Inbox{
 			Version:    vers,
-			Convs:      convs,
-			Pagination: nil,
+			Convs:      finalConvs,
+			Pagination: pagination,
 		}, nil, nil
 	}
 
@@ -335,14 +370,34 @@ func (s *localizer) localizeConversation(ctx context.Context, uid gregor1.UID,
 	conversationLocal.Info = chat1.ConversationInfoLocal{
 		Id:         conversationRemote.Metadata.ConversationID,
 		Visibility: conversationRemote.Metadata.Visibility,
+		Triple:     conversationRemote.Metadata.IdTriple,
 	}
-	if len(conversationRemote.MaxMsgs) == 0 {
-		errMsg := "conversation has an empty MaxMsgs field"
-		return chat1.ConversationLocal{Error: &chat1.ConversationErrorLocal{
+	conversationLocal.Info.FinalizeInfo = conversationRemote.Metadata.FinalizeInfo
+	for _, super := range conversationRemote.Supersedes {
+		conversationLocal.Supersedes = append(conversationLocal.Supersedes, super.ConversationID)
+	}
+	for _, super := range conversationRemote.SupersededBy {
+		conversationLocal.SupersededBy = append(conversationLocal.SupersededBy, super.ConversationID)
+	}
+	if conversationRemote.ReaderInfo == nil {
+		errMsg := "empty ReaderInfo from server?"
+		conversationLocal.Error = &chat1.ConversationErrorLocal{
 			Message:    errMsg,
 			RemoteConv: conversationRemote,
 			Permanent:  false,
-		}}
+		}
+		return conversationLocal
+	}
+	conversationLocal.ReaderInfo = *conversationRemote.ReaderInfo
+
+	if len(conversationRemote.MaxMsgs) == 0 {
+		errMsg := "conversation has an empty MaxMsgs field"
+		conversationLocal.Error = &chat1.ConversationErrorLocal{
+			Message:    errMsg,
+			RemoteConv: conversationRemote,
+			Permanent:  false,
+		}
+		return conversationLocal
 	}
 
 	var msgIDs []chat1.MessageID
@@ -354,28 +409,12 @@ func (s *localizer) localizeConversation(ctx context.Context, uid gregor1.UID,
 	conversationLocal.MaxMessages, err = s.G().ConvSource.GetMessages(ctx,
 		conversationRemote.Metadata.ConversationID, uid, msgIDs)
 	if err != nil {
-		return chat1.ConversationLocal{Error: &chat1.ConversationErrorLocal{
+		conversationLocal.Error = &chat1.ConversationErrorLocal{
 			Message:    err.Error(),
 			RemoteConv: conversationRemote,
 			Permanent:  s.isErrPermanent(err),
-		}}
-	}
-
-	if conversationRemote.ReaderInfo == nil {
-		errMsg := "empty ReaderInfo from server?"
-		return chat1.ConversationLocal{Error: &chat1.ConversationErrorLocal{
-			Message:    errMsg,
-			RemoteConv: conversationRemote,
-			Permanent:  false,
-		}}
-	}
-	conversationLocal.ReaderInfo = *conversationRemote.ReaderInfo
-	conversationLocal.Info.FinalizeInfo = conversationRemote.Metadata.FinalizeInfo
-	for _, super := range conversationRemote.Supersedes {
-		conversationLocal.Supersedes = append(conversationLocal.Supersedes, super.ConversationID)
-	}
-	for _, super := range conversationRemote.SupersededBy {
-		conversationLocal.SupersededBy = append(conversationLocal.SupersededBy, super.ConversationID)
+		}
+		return conversationLocal
 	}
 
 	// Set to true later if visible messages are in max messages.
@@ -408,22 +447,24 @@ func (s *localizer) localizeConversation(ctx context.Context, uid gregor1.UID,
 
 	if len(conversationLocal.Info.TlfName) == 0 {
 		errMsg := "no valid message in the conversation"
-		return chat1.ConversationLocal{Error: &chat1.ConversationErrorLocal{
+		conversationLocal.Error = &chat1.ConversationErrorLocal{
 			Message:    errMsg,
 			RemoteConv: conversationRemote,
 			Permanent:  false,
-		}}
+		}
+		return conversationLocal
 	}
 
 	// Verify ConversationID is derivable from ConversationIDTriple
 	if !conversationLocal.Info.Triple.Derivable(conversationLocal.Info.Id) {
 		errMsg := fmt.Sprintf("unexpected response from server: conversation ID is not derivable from conversation triple. triple: %#+v; Id: %x",
 			conversationLocal.Info.Triple, conversationLocal.Info.Id)
-		return chat1.ConversationLocal{Error: &chat1.ConversationErrorLocal{
+		conversationLocal.Error = &chat1.ConversationErrorLocal{
 			Message:    errMsg,
 			RemoteConv: conversationRemote,
 			Permanent:  false,
-		}}
+		}
+		return conversationLocal
 	}
 
 	// Only do this check if there is a chance the TLF name might be an SBS name.
@@ -431,11 +472,12 @@ func (s *localizer) localizeConversation(ctx context.Context, uid gregor1.UID,
 		info, err := LookupTLF(ctx, s.getTlfInterface(), conversationLocal.Info.TlfName, conversationLocal.Info.Visibility)
 		if err != nil {
 			errMsg := err.Error()
-			return chat1.ConversationLocal{Error: &chat1.ConversationErrorLocal{
+			conversationLocal.Error = &chat1.ConversationErrorLocal{
 				Message:    errMsg,
 				RemoteConv: conversationRemote,
 				Permanent:  s.isErrPermanent(err),
-			}}
+			}
+			return conversationLocal
 		}
 		// Not sure about the utility of this TlfName assignment, but the previous code did this:
 		conversationLocal.Info.TlfName = info.CanonicalName
@@ -448,21 +490,23 @@ func (s *localizer) localizeConversation(ctx context.Context, uid gregor1.UID,
 		conversationRemote.Metadata.ActiveList)
 	if err != nil {
 		errMsg := fmt.Sprintf("error reordering participants: %v", err.Error())
-		return chat1.ConversationLocal{Error: &chat1.ConversationErrorLocal{
+		conversationLocal.Error = &chat1.ConversationErrorLocal{
 			Message:    errMsg,
 			RemoteConv: conversationRemote,
 			Permanent:  s.isErrPermanent(err),
-		}}
+		}
+		return conversationLocal
 	}
 
 	// verify Conv matches ConversationIDTriple in MessageClientHeader
 	if !conversationRemote.Metadata.IdTriple.Eq(conversationLocal.Info.Triple) {
 		errMsg := "server header conversation triple does not match client header triple"
-		return chat1.ConversationLocal{Error: &chat1.ConversationErrorLocal{
+		conversationLocal.Error = &chat1.ConversationErrorLocal{
 			Message:    errMsg,
 			RemoteConv: conversationRemote,
 			Permanent:  false,
-		}}
+		}
+		return conversationLocal
 	}
 
 	return conversationLocal

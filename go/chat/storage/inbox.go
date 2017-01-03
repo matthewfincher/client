@@ -12,8 +12,9 @@ import (
 
 	"crypto/sha1"
 
-	"encoding/base64"
+	"encoding/hex"
 
+	"github.com/keybase/client/go/chat/pager"
 	"github.com/keybase/client/go/libkb"
 	"github.com/keybase/client/go/protocol/chat1"
 	"github.com/keybase/client/go/protocol/gregor1"
@@ -21,16 +22,30 @@ import (
 
 const inboxVersion = 2
 
+type queryHash []byte
+
+func (q queryHash) Empty() bool {
+	return len(q) == 0
+}
+
+func (q queryHash) String() string {
+	return hex.EncodeToString(q)
+}
+
+func (q queryHash) Eq(r queryHash) bool {
+	return bytes.Equal(q, r)
+}
+
 type inboxDiskQuery struct {
-	QueryHash  string            `codec:"Q"`
+	QueryHash  queryHash         `codec:"Q"`
 	Pagination *chat1.Pagination `codec:"P"`
 }
 
 func (q inboxDiskQuery) queryMatch(other inboxDiskQuery) bool {
-	if q.QueryHash == "" && other.QueryHash == "" {
+	if q.QueryHash.Empty() && other.QueryHash.Empty() {
 		return true
-	} else if q.QueryHash != "" && other.QueryHash != "" {
-		return q.QueryHash == other.QueryHash
+	} else if !q.QueryHash.Empty() && !other.QueryHash.Empty() {
+		return q.QueryHash.Eq(other.QueryHash)
 	}
 	return false
 }
@@ -117,15 +132,26 @@ func (i *Inbox) writeDiskInbox(ibox inboxDiskData) libkb.ChatStorageError {
 
 type ByDatabaseOrder []chat1.ConversationLocal
 
+func dbConvLess(a pager.InboxPagerFields, b pager.InboxPagerFields) bool {
+	if a.Mtime > b.Mtime {
+		return true
+	} else if a.Mtime < b.Mtime {
+		return false
+	}
+	return bytes.Compare(a.ConvID, b.ConvID) > 0
+}
+
+func exportConvLocal(c chat1.ConversationLocal) pager.InboxPagerFields {
+	return pager.InboxPagerFields{
+		Mtime:  c.ReaderInfo.Mtime,
+		ConvID: c.Info.Id,
+	}
+}
+
 func (a ByDatabaseOrder) Len() int      { return len(a) }
 func (a ByDatabaseOrder) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
 func (a ByDatabaseOrder) Less(i, j int) bool {
-	if a[i].ReaderInfo.Mtime > a[j].ReaderInfo.Mtime {
-		return true
-	} else if a[i].ReaderInfo.Mtime < a[j].ReaderInfo.Mtime {
-		return false
-	}
-	return bytes.Compare(a[i].Info.Id, a[j].Info.Id) > 0
+	return dbConvLess(exportConvLocal(a[i]), exportConvLocal(a[j]))
 }
 
 func (i *Inbox) mergeConvs(l []chat1.ConversationLocal, r []chat1.ConversationLocal) (res []chat1.ConversationLocal) {
@@ -143,19 +169,19 @@ func (i *Inbox) mergeConvs(l []chat1.ConversationLocal, r []chat1.ConversationLo
 	return res
 }
 
-func (i *Inbox) hashQuery(query *chat1.GetInboxLocalQuery) (string, libkb.ChatStorageError) {
+func (i *Inbox) hashQuery(query *chat1.GetInboxLocalQuery) (queryHash, libkb.ChatStorageError) {
 	if query == nil {
-		return "", nil
+		return nil, nil
 	}
 
 	dat, err := encode(*query)
 	if err != nil {
-		return "", libkb.NewChatStorageInternalError(i.G(), "failed to encode query: %s", err.Error())
+		return nil, libkb.NewChatStorageInternalError(i.G(), "failed to encode query: %s", err.Error())
 	}
 
 	hasher := sha1.New()
 	hasher.Write(dat)
-	return base64.URLEncoding.EncodeToString(hasher.Sum(nil)), nil
+	return hasher.Sum(nil), nil
 }
 
 func (i *Inbox) Merge(vers chat1.InboxVers, convs []chat1.ConversationLocal,
@@ -244,6 +270,63 @@ func (i *Inbox) applyQuery(query *chat1.GetInboxLocalQuery, convs []chat1.Conver
 	return res
 }
 
+func (i *Inbox) applyPagination(convs []chat1.ConversationLocal, p *chat1.Pagination) ([]chat1.ConversationLocal, *chat1.Pagination, libkb.ChatStorageError) {
+
+	if p == nil {
+		return convs, nil, nil
+	}
+
+	var res []chat1.ConversationLocal
+	var pnext, pprev pager.InboxPagerFields
+	num := p.Num
+	hasnext := len(p.Next) > 0
+	hasprev := len(p.Previous) > 0
+	i.debug("applyPagination: num: %d", num)
+	if hasnext {
+		if err := decode(p.Next, &pnext); err != nil {
+			return nil, nil, libkb.ChatStorageRemoteError{Msg: "applyPagination: failed to decode pager: " + err.Error()}
+		}
+		i.debug("applyPagination: using next pointer: mtime: %v", pnext.Mtime)
+	} else if hasprev {
+		if err := decode(p.Previous, &pprev); err != nil {
+			return nil, nil, libkb.ChatStorageRemoteError{Msg: "applyPagination: failed to decode pager: " + err.Error()}
+		}
+		i.debug("applyPagination: using prev pinter: mtime: %v", pprev.Mtime)
+	} else {
+		i.debug("applyPagination: no next or prev pointers, just using num limit")
+	}
+
+	for _, conv := range convs {
+		if len(res) >= num {
+			i.debug("applyPagination: reached num results (%d), stopping", num)
+			break
+		}
+
+		if hasnext {
+			if dbConvLess(exportConvLocal(conv), pnext) {
+				res = append(res, conv)
+			}
+		} else if hasprev {
+			if dbConvLess(pprev, exportConvLocal(conv)) {
+				res = append(res, conv)
+			}
+		} else {
+			res = append(res, conv)
+		}
+	}
+
+	var pres []pager.InboxEntry
+	for _, r := range res {
+		pres = append(pres, r)
+	}
+	pagination, err := pager.NewInboxPager().MakePage(pres, num)
+	if err != nil {
+		return nil, nil, libkb.NewChatStorageInternalError(i.G(),
+			"failure to create inbox page: %s", err.Error())
+	}
+	return res, pagination, nil
+}
+
 func (i *Inbox) queryExists(ibox inboxDiskData, query *chat1.GetInboxLocalQuery,
 	p *chat1.Pagination) bool {
 
@@ -263,25 +346,30 @@ func (i *Inbox) queryExists(ibox inboxDiskData, query *chat1.GetInboxLocalQuery,
 	return false
 }
 
-func (i *Inbox) Read(query *chat1.GetInboxLocalQuery, p *chat1.Pagination) (chat1.InboxVers, []chat1.ConversationLocal, libkb.ChatStorageError) {
+func (i *Inbox) Read(query *chat1.GetInboxLocalQuery, p *chat1.Pagination) (chat1.InboxVers, []chat1.ConversationLocal, *chat1.Pagination, libkb.ChatStorageError) {
 	i.Lock()
 	defer i.Unlock()
 
 	ibox, err := i.readDiskInbox()
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
 
 	// Check to make sure query parameters have been seen before
 	if !i.queryExists(ibox, query, p) {
 		i.debug("Read: miss: query or pagination unknown")
-		return 0, nil, libkb.ChatStorageMissError{}
+		return 0, nil, nil, libkb.ChatStorageMissError{}
 	}
-	ibox.Conversations = i.applyQuery(query, ibox.Conversations)
-	// TODO pagination
+
+	// Apply query and pagination
+	res := i.applyQuery(query, ibox.Conversations)
+	res, pagination, err := i.applyPagination(ibox.Conversations, p)
+	if err != nil {
+		return 0, nil, nil, err
+	}
 
 	i.debug("Read: hit: version: %d", ibox.InboxVersion)
-	return ibox.InboxVersion, ibox.Conversations, nil
+	return ibox.InboxVersion, res, pagination, nil
 }
 
 func (i *Inbox) clear() libkb.ChatStorageError {
