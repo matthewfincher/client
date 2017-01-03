@@ -243,29 +243,53 @@ func (i *Inbox) applyQuery(query *chat1.GetInboxLocalQuery, convs []chat1.Conver
 		ok := true
 		if query.ConvID != nil && !query.ConvID.Eq(conv.Info.Id) {
 			ok = false
-		} else if query.After != nil && !query.After.After(conv.ReaderInfo.Mtime) {
-			ok = false
-		} else if query.Before != nil && !query.Before.Before(conv.ReaderInfo.Mtime) {
-			ok = false
-		} else if query.TopicName != nil && *query.TopicName != conv.Info.TopicName {
-			ok = false
-		} else if query.TopicType != nil && *query.TopicType != conv.Info.Triple.TopicType {
-			ok = false
-		} else if query.TlfVisibility != nil && *query.TlfVisibility != conv.Info.Visibility {
-			ok = false
-		} else if query.UnreadOnly && conv.ReaderInfo.ReadMsgid >= conv.ReaderInfo.MaxMsgid {
-			ok = false
-		} else if query.TlfName != nil && *query.TlfName != conv.Info.TlfName {
-			ok = false
-		} else if query.ReadOnly && conv.ReaderInfo.ReadMsgid < conv.ReaderInfo.MaxMsgid {
+		}
+		if query.After != nil && !query.After.After(conv.ReaderInfo.Mtime) {
 			ok = false
 		}
+		if query.Before != nil && !query.Before.Before(conv.ReaderInfo.Mtime) {
+			ok = false
+		}
+		if query.TopicName != nil && *query.TopicName != conv.Info.TopicName {
+			ok = false
+		}
+		if query.TopicType != nil && *query.TopicType != conv.Info.Triple.TopicType {
+			ok = false
+		}
+		if query.TlfVisibility != nil && *query.TlfVisibility != conv.Info.Visibility {
+			ok = false
+		}
+		if query.UnreadOnly && conv.ReaderInfo.ReadMsgid >= conv.ReaderInfo.MaxMsgid {
+			ok = false
+		}
+		if query.TlfName != nil && *query.TlfName != conv.Info.TlfName {
+			ok = false
+		}
+		if query.ReadOnly && conv.ReaderInfo.ReadMsgid < conv.ReaderInfo.MaxMsgid {
+			ok = false
+		}
+		if len(query.Status) > 0 {
+			found := false
+			for _, s := range query.Status {
+				if s == conv.Info.Status {
+					found = true
+					break
+				}
+			}
+			if !found {
+				ok = false
+			}
+		}
+		if query.OneChatTypePerTLF == nil ||
+			(query.OneChatTypePerTLF != nil && *query.OneChatTypePerTLF) {
+			if conv.Info.FinalizeInfo != nil && len(conv.SupersededBy) > 0 {
+				ok = false
+			}
+		}
+
 		if ok {
 			res = append(res, conv)
 		}
-		// TODO: Status filter
-		// TODO: ComputeActiveList
-		// TODO: OneChatTypePerTLF
 	}
 	return res
 }
