@@ -296,6 +296,7 @@ func (i *Inbox) applyPagination(convs []chat1.ConversationLocal, p *chat1.Pagina
 		i.debug("applyPagination: no next or prev pointers, just using num limit")
 	}
 
+	// TODO: fix me
 	for _, conv := range convs {
 		if len(res) >= num {
 			i.debug("applyPagination: reached num results (%d), stopping", num)
@@ -479,6 +480,7 @@ func (i *Inbox) NewMessage(vers chat1.InboxVers, convID chat1.ConversationID, ms
 		i.debug("NewMessage: no conversation found: convID: %s, clearing", convID)
 		return i.clear()
 	}
+	mconv := *conv
 
 	// Update conversation
 	found := false
@@ -500,7 +502,7 @@ func (i *Inbox) NewMessage(vers chat1.InboxVers, convID chat1.ConversationID, ms
 	// Slot in at the top
 	i.debug("NewMessage: promoting convID: %s to the top of %d convs", convID, len(ibox.Conversations))
 	ibox.Conversations = append(ibox.Conversations[:index], ibox.Conversations[index+1:]...)
-	ibox.Conversations = append([]chat1.ConversationLocal{*conv}, ibox.Conversations...)
+	ibox.Conversations = append([]chat1.ConversationLocal{mconv}, ibox.Conversations...)
 
 	// Write out to disk
 	ibox.InboxVersion = vers
