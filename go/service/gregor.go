@@ -153,9 +153,8 @@ func newGregorHandler(g *libkb.GlobalContext) (*gregorHandler, error) {
 		pushStateFilter: func(m gregor.Message) bool { return true },
 		badger:          nil,
 		identNotifier:   chat.NewIdentifyNotifier(g),
+		chatSync:        chat.NewSyncer(g),
 	}
-	gh.chatSync =
-		chat.NewSyncer(g, func() chat1.RemoteInterface { return chat1.RemoteClient{Cli: gh.cli} })
 
 	// Attempt to create a gregor client initially, if we are not logged in
 	// or don't have user/device info in G, then this won't work
@@ -492,7 +491,9 @@ func (g *gregorHandler) OnConnect(ctx context.Context, conn *rpc.Connection,
 	// Sync chat data using a Syncer object
 	gcli, err := g.getGregorCli()
 	if err == nil {
-		if err := g.chatSync.Connected(ctx, gcli.User.(gregor1.UID)); err != nil {
+		chatCli := chat1.RemoteClient{Cli: cli}
+		uid := gcli.User.(gregor1.UID)
+		if err := g.chatSync.Connected(ctx, chatCli, uid); err != nil {
 			return err
 		}
 	}

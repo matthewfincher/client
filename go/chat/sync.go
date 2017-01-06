@@ -14,15 +14,12 @@ import (
 type Syncer struct {
 	libkb.Contextified
 	utils.DebugLabeller
-
-	ri func() chat1.RemoteInterface
 }
 
-func NewSyncer(g *libkb.GlobalContext, ri func() chat1.RemoteInterface) *Syncer {
+func NewSyncer(g *libkb.GlobalContext) *Syncer {
 	return &Syncer{
 		Contextified:  libkb.NewContextified(g),
-		DebugLabeller: utils.NewDebugLabeller(g, "syncer"),
-		ri:            ri,
+		DebugLabeller: utils.NewDebugLabeller(g, "Syncer"),
 	}
 }
 
@@ -34,14 +31,15 @@ func (s *Syncer) sendChatStaleNotifications(uid gregor1.UID) {
 	s.G().NotifyRouter.HandleChatThreadsStale(context.Background(), kuid, []chat1.ConversationID{})
 }
 
-func (s *Syncer) Connected(ctx context.Context, uid gregor1.UID) error {
+func (s *Syncer) Connected(ctx context.Context, cli chat1.RemoteInterface, uid gregor1.UID) error {
+	s.Debug(ctx, "Connected: running")
 
 	// Grab the latest inbox version, and compare it to what we have
 	// If we don't have the latest, then we clear the Inbox cache and
 	// send alerts to clients that they should refresh.
-	vers, err := s.ri().GetInboxVersion(context.Background(), uid)
+	vers, err := cli.GetInboxVersion(context.Background(), uid)
 	if err != nil {
-		s.Debug(ctx, "failed to sync inbox version: uid: %s error: %s", uid, err.Error())
+		s.Debug(ctx, "Connected: failed to sync inbox version: uid: %s error: %s", uid, err.Error())
 		return err
 	}
 
@@ -51,8 +49,10 @@ func (s *Syncer) Connected(ctx context.Context, uid gregor1.UID) error {
 	// If we miss here, then let's send notifications out to clients letting
 	// them know everything is hosed
 	if verr := ibox.VersionSync(vers); verr != nil {
-		s.Debug(ctx, "error during version sync: %s", verr.Error())
+		s.Debug(ctx, "Connected: error during version sync: %s, sending notifications", verr.Error())
 		s.sendChatStaleNotifications(uid)
+	} else {
+		s.Debug(ctx, "Connected: version sync success! version: %d", vers)
 	}
 
 	// Let the Deliverer know that we are back online
@@ -62,6 +62,7 @@ func (s *Syncer) Connected(ctx context.Context, uid gregor1.UID) error {
 }
 
 func (s *Syncer) Disconnected(ctx context.Context) {
+	s.Debug(ctx, "Disconnected: running")
 
 	// Let the Deliverer know we are offline
 	s.G().MessageDeliverer.Disconnected()
