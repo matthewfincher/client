@@ -226,7 +226,7 @@ func (s *BlockingSender) Send(ctx context.Context, convID chat1.ConversationID,
 	}
 	if err = storage.NewInbox(s.G(), boxed.ClientHeader.Sender, func() libkb.SecretUI {
 		return DelivererSecretUI{}
-	}).NewMessage(0, convID, unboxed); err != nil {
+	}).NewMessage(ctx, 0, convID, unboxed); err != nil {
 		if _, ok := err.(libkb.ChatStorageMissError); !ok {
 			return chat1.OutboxID{}, 0, nil, err
 		}

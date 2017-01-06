@@ -925,7 +925,7 @@ func (g *gregorHandler) chatTlfFinalize(ctx context.Context, m gregor.OutOfBandM
 	// Update inbox
 	if err := cstorage.NewInbox(g.G(), m.UID().Bytes(), func() libkb.SecretUI {
 		return chat.DelivererSecretUI{}
-	}).TlfFinalize(update.InboxVers, update.ConvIDs, update.FinalizeInfo); err != nil {
+	}).TlfFinalize(ctx, update.InboxVers, update.ConvIDs, update.FinalizeInfo); err != nil {
 		if _, ok := (err).(libkb.ChatStorageMissError); !ok {
 			g.G().Log.Error("push handler: tlf finalize: unable to update inbox: %s", err.Error())
 		}
@@ -957,6 +957,9 @@ func (g *gregorHandler) newChatActivity(ctx context.Context, m gregor.OutOfBandM
 
 	g.G().Log.Debug("push handler: chat activity: action %s", gm.Action)
 
+	var identBreaks []keybase1.TLFIdentifyFailure
+	ctx = chat.Context(ctx, keybase1.TLFIdentifyBehavior_CHAT_GUI, &identBreaks, g.identNotifier)
+
 	action := gm.Action
 	reader.Reset(m.Body().Bytes())
 	switch action {
@@ -978,15 +981,13 @@ func (g *gregorHandler) newChatActivity(ctx context.Context, m gregor.OutOfBandM
 		}
 		uid := m.UID().Bytes()
 
-		var identBreaks []keybase1.TLFIdentifyFailure
-		ctx = chat.Context(ctx, keybase1.TLFIdentifyBehavior_CHAT_GUI, &identBreaks, g.identNotifier)
 		decmsg, append, err := g.G().ConvSource.Push(ctx, nm.ConvID, gregor1.UID(uid), nm.Message)
 		if err != nil {
 			g.G().Log.Error("push handler: chat activity: unable to storage message: %s", err.Error())
 		}
 		if err = cstorage.NewInbox(g.G(), uid, func() libkb.SecretUI {
 			return chat.DelivererSecretUI{}
-		}).NewMessage(nm.InboxVers, nm.ConvID, decmsg); err != nil {
+		}).NewMessage(ctx, nm.InboxVers, nm.ConvID, decmsg); err != nil {
 			if _, ok := (err).(libkb.ChatStorageMissError); !ok {
 				g.G().Log.Error("push handler: chat activity: unable to update inbox: %s", err.Error())
 			}
@@ -1023,7 +1024,7 @@ func (g *gregorHandler) newChatActivity(ctx context.Context, m gregor.OutOfBandM
 		uid := m.UID().Bytes()
 		if err = cstorage.NewInbox(g.G(), uid, func() libkb.SecretUI {
 			return chat.DelivererSecretUI{}
-		}).ReadMessage(nm.InboxVers, nm.ConvID, nm.MsgID); err != nil {
+		}).ReadMessage(ctx, nm.InboxVers, nm.ConvID, nm.MsgID); err != nil {
 			if _, ok := (err).(libkb.ChatStorageMissError); !ok {
 				g.G().Log.Error("push handler: chat activity: unable to update inbox: %s", err.Error())
 			}
@@ -1049,7 +1050,7 @@ func (g *gregorHandler) newChatActivity(ctx context.Context, m gregor.OutOfBandM
 		uid := m.UID().Bytes()
 		if err = cstorage.NewInbox(g.G(), uid, func() libkb.SecretUI {
 			return chat.DelivererSecretUI{}
-		}).SetStatus(nm.InboxVers, nm.ConvID, nm.Status); err != nil {
+		}).SetStatus(ctx, nm.InboxVers, nm.ConvID, nm.Status); err != nil {
 			if _, ok := (err).(libkb.ChatStorageMissError); !ok {
 				g.G().Log.Error("push handler: chat activity: unable to update inbox: %s", err.Error())
 			}
@@ -1097,7 +1098,7 @@ func (g *gregorHandler) newChatActivity(ctx context.Context, m gregor.OutOfBandM
 
 		if err = cstorage.NewInbox(g.G(), uid, func() libkb.SecretUI {
 			return chat.DelivererSecretUI{}
-		}).NewConversation(nm.InboxVers, inbox.Convs[0]); err != nil {
+		}).NewConversation(ctx, nm.InboxVers, inbox.Convs[0]); err != nil {
 			if _, ok := (err).(libkb.ChatStorageMissError); !ok {
 				g.G().Log.Error("push handler: chat activity: unable to update inbox: %s", err.Error())
 			}

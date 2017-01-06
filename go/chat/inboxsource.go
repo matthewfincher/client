@@ -249,7 +249,7 @@ func (s *HybridInboxSource) Read(ctx context.Context, uid gregor1.UID, query *ch
 	p *chat1.Pagination) (Inbox, *chat1.RateLimit, error) {
 
 	// Try local storage
-	vers, convs, pagination, cerr := s.inbox.Read(query, p)
+	vers, convs, pagination, cerr := s.inbox.Read(ctx, query, p)
 	if cerr != nil {
 		if _, ok := cerr.(libkb.ChatStorageMissError); !ok {
 			s.Debug(ctx, "Read: error fetching inbox: %s", cerr.Error())
