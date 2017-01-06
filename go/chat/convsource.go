@@ -89,7 +89,7 @@ func (s *RemoteConversationSource) GetMessages(ctx context.Context, convID chat1
 
 type HybridConversationSource struct {
 	libkb.Contextified
-	utils.DebugLabeller
+	utils.DebugLabeler
 
 	ri      func() chat1.RemoteInterface
 	boxer   *Boxer
@@ -99,11 +99,11 @@ type HybridConversationSource struct {
 func NewHybridConversationSource(g *libkb.GlobalContext, b *Boxer, storage *storage.Storage,
 	ri func() chat1.RemoteInterface) *HybridConversationSource {
 	return &HybridConversationSource{
-		Contextified:  libkb.NewContextified(g),
-		DebugLabeller: utils.NewDebugLabeller(g, "HybridConversationSource"),
-		ri:            ri,
-		boxer:         b,
-		storage:       storage,
+		Contextified: libkb.NewContextified(g),
+		DebugLabeler: utils.NewDebugLabeler(g, "HybridConversationSource"),
+		ri:           ri,
+		boxer:        b,
+		storage:      storage,
 	}
 }
 

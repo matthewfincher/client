@@ -23,7 +23,7 @@ type resultCollector interface {
 type Storage struct {
 	sync.Mutex
 	libkb.Contextified
-	utils.DebugLabeller
+	utils.DebugLabeler
 
 	getSecretUI func() libkb.SecretUI
 	engine      storageEngine
@@ -41,11 +41,11 @@ type storageEngine interface {
 
 func New(g *libkb.GlobalContext, getSecretUI func() libkb.SecretUI) *Storage {
 	return &Storage{
-		Contextified:  libkb.NewContextified(g),
-		getSecretUI:   getSecretUI,
-		engine:        newBlockEngine(g),
-		idtracker:     newMsgIDTracker(g),
-		DebugLabeller: utils.NewDebugLabeller(g, "chatstorage"),
+		Contextified: libkb.NewContextified(g),
+		getSecretUI:  getSecretUI,
+		engine:       newBlockEngine(g),
+		idtracker:    newMsgIDTracker(g),
+		DebugLabeler: utils.NewDebugLabeler(g, "chatstorage"),
 	}
 }
 

@@ -204,18 +204,18 @@ func IsVisibleChatMessageType(messageType chat1.MessageType) bool {
 	return false
 }
 
-type DebugLabeller struct {
+type DebugLabeler struct {
 	libkb.Contextified
 	label string
 }
 
-func NewDebugLabeller(g *libkb.GlobalContext, label string) DebugLabeller {
-	return DebugLabeller{
+func NewDebugLabeler(g *libkb.GlobalContext, label string) DebugLabeler {
+	return DebugLabeler{
 		Contextified: libkb.NewContextified(g),
 		label:        label,
 	}
 }
 
-func (d DebugLabeller) Debug(ctx context.Context, msg string, args ...interface{}) {
+func (d DebugLabeler) Debug(ctx context.Context, msg string, args ...interface{}) {
 	d.G().Log.CDebugf(ctx, d.label+": "+msg, args...)
 }

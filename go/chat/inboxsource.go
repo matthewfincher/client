@@ -194,7 +194,7 @@ func (s *NonblockRemoteInboxSource) Read(ctx context.Context, uid gregor1.UID,
 
 type HybridInboxSource struct {
 	libkb.Contextified
-	utils.DebugLabeller
+	utils.DebugLabeler
 
 	remote    *RemoteInboxSource
 	inbox     *storage.Inbox
@@ -203,11 +203,11 @@ type HybridInboxSource struct {
 
 func NewHybridInboxSource(g *libkb.GlobalContext, inbox *storage.Inbox, remote *RemoteInboxSource) *HybridInboxSource {
 	return &HybridInboxSource{
-		Contextified:  libkb.NewContextified(g),
-		DebugLabeller: utils.NewDebugLabeller(g, "HybridInboxSource"),
-		remote:        remote,
-		inbox:         inbox,
-		localizer:     newLocalizer(g, remote.getTlfInterface),
+		Contextified: libkb.NewContextified(g),
+		DebugLabeler: utils.NewDebugLabeler(g, "HybridInboxSource"),
+		remote:       remote,
+		inbox:        inbox,
+		localizer:    newLocalizer(g, remote.getTlfInterface),
 	}
 }
 

@@ -13,13 +13,13 @@ import (
 
 type Syncer struct {
 	libkb.Contextified
-	utils.DebugLabeller
+	utils.DebugLabeler
 }
 
 func NewSyncer(g *libkb.GlobalContext) *Syncer {
 	return &Syncer{
-		Contextified:  libkb.NewContextified(g),
-		DebugLabeller: utils.NewDebugLabeller(g, "Syncer"),
+		Contextified: libkb.NewContextified(g),
+		DebugLabeler: utils.NewDebugLabeler(g, "Syncer"),
 	}
 }
 

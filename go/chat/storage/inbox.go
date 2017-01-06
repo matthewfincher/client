@@ -76,17 +76,17 @@ type Inbox struct {
 	sync.Mutex
 	libkb.Contextified
 	*baseBox
-	utils.DebugLabeller
+	utils.DebugLabeler
 
 	uid gregor1.UID
 }
 
 func NewInbox(g *libkb.GlobalContext, uid gregor1.UID, getSecretUI func() libkb.SecretUI) *Inbox {
 	return &Inbox{
-		Contextified:  libkb.NewContextified(g),
-		DebugLabeller: utils.NewDebugLabeller(g, "Inbox(uid="+uid.String()+")"),
-		baseBox:       newBaseBox(g, getSecretUI),
-		uid:           uid,
+		Contextified: libkb.NewContextified(g),
+		DebugLabeler: utils.NewDebugLabeler(g, "Inbox(uid="+uid.String()+")"),
+		baseBox:      newBaseBox(g, getSecretUI),
+		uid:          uid,
 	}
 }
 
