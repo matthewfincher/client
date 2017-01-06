@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/keybase/client/go/chat/storage"
+	"github.com/keybase/client/go/chat/utils"
 	"github.com/keybase/client/go/libkb"
 	"github.com/keybase/client/go/protocol/chat1"
 	"github.com/keybase/client/go/protocol/gregor1"
@@ -88,6 +89,8 @@ func (s *RemoteConversationSource) GetMessages(ctx context.Context, convID chat1
 
 type HybridConversationSource struct {
 	libkb.Contextified
+	utils.DebugLabeller
+
 	ri      func() chat1.RemoteInterface
 	boxer   *Boxer
 	storage *storage.Storage
@@ -96,15 +99,12 @@ type HybridConversationSource struct {
 func NewHybridConversationSource(g *libkb.GlobalContext, b *Boxer, storage *storage.Storage,
 	ri func() chat1.RemoteInterface) *HybridConversationSource {
 	return &HybridConversationSource{
-		Contextified: libkb.NewContextified(g),
-		ri:           ri,
-		boxer:        b,
-		storage:      storage,
+		Contextified:  libkb.NewContextified(g),
+		DebugLabeller: utils.NewDebugLabeller(g, "HybridConversationSource"),
+		ri:            ri,
+		boxer:         b,
+		storage:       storage,
 	}
-}
-
-func (s *HybridConversationSource) debug(msg string, args ...interface{}) {
-	s.G().Log.Debug("HybridConversationSource: "+msg, args...)
 }
 
 func (s *HybridConversationSource) Push(ctx context.Context, convID chat1.ConversationID,
@@ -168,7 +168,7 @@ func (s *HybridConversationSource) identifyTLF(ctx context.Context, convID chat1
 	for _, msg := range msgs {
 		if msg.IsValid() {
 			tlfName := msg.Valid().ClientHeader.TlfName
-			s.debug("identifyTLF: identifying from msg ID: %d name: %s convID: %s",
+			s.Debug(ctx, "identifyTLF: identifying from msg ID: %d name: %s convID: %s",
 				msg.GetMessageID(), tlfName, convID)
 
 			vis := chat1.TLFVisibility_PRIVATE
@@ -176,14 +176,14 @@ func (s *HybridConversationSource) identifyTLF(ctx context.Context, convID chat1
 				vis = chat1.TLFVisibility_PUBLIC
 			}
 			if _, err := LookupTLF(ctx, s.boxer.tlf, tlfName, vis); err != nil {
-				s.debug("identifyTLF: failure: name: %s convID: %s", tlfName, convID)
+				s.Debug(ctx, "identifyTLF: failure: name: %s convID: %s", tlfName, convID)
 				return err
 			}
 			return nil
 		}
 	}
 
-	s.debug("identifyTLF: no identify performed, no valid messages found")
+	s.Debug(ctx, "identifyTLF: no identify performed, no valid messages found")
 	return nil
 }
 
@@ -203,11 +203,11 @@ func (s *HybridConversationSource) Pull(ctx context.Context, convID chat1.Conver
 		localData, err := s.storage.Fetch(ctx, conv, uid, query, pagination)
 		if err == nil {
 			// If found, then return the stuff
-			s.debug("Pull: cache hit: convID: %s uid: %s", convID, uid)
+			s.Debug(ctx, "Pull: cache hit: convID: %s uid: %s", convID, uid)
 
 			// Identify this TLF by running crypt keys
 			if ierr := s.identifyTLF(ctx, convID, uid, localData.Messages); ierr != nil {
-				s.debug("Pull: identify failed: %s", ierr.Error())
+				s.Debug(ctx, "Pull: identify failed: %s", ierr.Error())
 				return chat1.ThreadView{}, nil, ierr
 			}
 
@@ -234,7 +234,7 @@ func (s *HybridConversationSource) Pull(ctx context.Context, convID chat1.Conver
 			return localData, rl, nil
 		}
 	} else {
-		s.debug("Pull: error fetching conv metadata: convID: %s uid: %s err: %s", convID, uid,
+		s.Debug(ctx, "Pull: error fetching conv metadata: convID: %s uid: %s err: %s", convID, uid,
 			err.Error())
 	}
 
@@ -286,7 +286,7 @@ func (s *HybridConversationSource) updateMessage(ctx context.Context, message ch
 		m := message.Valid()
 		if m.HeaderSignature == nil {
 			// Skip revocation check for messages cached before the sig was part of the cache.
-			s.debug("updateMessage skipping message (%v) with no cached HeaderSignature", m.ServerHeader.MessageID)
+			s.Debug(ctx, "updateMessage skipping message (%v) with no cached HeaderSignature", m.ServerHeader.MessageID)
 			return message, nil
 		}
 
@@ -321,7 +321,7 @@ func (s *HybridConversationSource) PullLocalOnly(ctx context.Context, convID cha
 
 	// Identify this TLF by running crypt keys
 	if ierr := s.identifyTLF(ctx, convID, uid, tv.Messages); ierr != nil {
-		s.debug("PullLocalOnly: identify failed: %s", ierr.Error())
+		s.Debug(ctx, "PullLocalOnly: identify failed: %s", ierr.Error())
 		return chat1.ThreadView{}, ierr
 	}
 
@@ -357,7 +357,7 @@ func (s *HybridConversationSource) GetMessages(ctx context.Context, convID chat1
 	}
 
 	// Grab message from remote
-	s.debug("GetMessages: convID: %s uid: %s total msgs: %d remote: %d", convID, uid, len(msgIDs),
+	s.Debug(ctx, "GetMessages: convID: %s uid: %s total msgs: %d remote: %d", convID, uid, len(msgIDs),
 		len(remoteMsgs))
 	if len(remoteMsgs) > 0 {
 		rmsgs, err := s.ri().GetMessagesRemote(ctx, chat1.GetMessagesRemoteArg{
@@ -397,7 +397,7 @@ func (s *HybridConversationSource) GetMessages(ctx context.Context, convID chat1
 
 	// Identify this TLF by running crypt keys
 	if ierr := s.identifyTLF(ctx, convID, uid, res); ierr != nil {
-		s.debug("GetMessages: identify failed: %s", ierr.Error())
+		s.Debug(ctx, "GetMessages: identify failed: %s", ierr.Error())
 		return nil, ierr
 	}
 

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/keybase/client/go/chat/storage"
+	"github.com/keybase/client/go/chat/utils"
 	"github.com/keybase/client/go/libkb"
 	"github.com/keybase/client/go/protocol/chat1"
 	"github.com/keybase/client/go/protocol/gregor1"
@@ -193,6 +194,7 @@ func (s *NonblockRemoteInboxSource) Read(ctx context.Context, uid gregor1.UID,
 
 type HybridInboxSource struct {
 	libkb.Contextified
+	utils.DebugLabeller
 
 	remote    *RemoteInboxSource
 	inbox     *storage.Inbox
@@ -201,10 +203,11 @@ type HybridInboxSource struct {
 
 func NewHybridInboxSource(g *libkb.GlobalContext, inbox *storage.Inbox, remote *RemoteInboxSource) *HybridInboxSource {
 	return &HybridInboxSource{
-		Contextified: libkb.NewContextified(g),
-		remote:       remote,
-		inbox:        inbox,
-		localizer:    newLocalizer(g, remote.getTlfInterface),
+		Contextified:  libkb.NewContextified(g),
+		DebugLabeller: utils.NewDebugLabeller(g, "HybridInboxSource"),
+		remote:        remote,
+		inbox:         inbox,
+		localizer:     newLocalizer(g, remote.getTlfInterface),
 	}
 }
 
@@ -220,7 +223,7 @@ func (s *HybridInboxSource) finalizeConvs(ctx context.Context, uid gregor1.UID,
 	}
 
 	// Localize them
-	s.G().Log.Debug("HybridInboxSource: finalizing %d conversations", len(convErrs))
+	s.Debug(ctx, "Read: finalizeConv: finalizing %d conversations", len(convErrs))
 	convLocals, err := s.localizer.localizeConversationsPipeline(ctx, uid, convErrs, nil)
 	if err != nil {
 		return nil, err
@@ -249,10 +252,10 @@ func (s *HybridInboxSource) Read(ctx context.Context, uid gregor1.UID, query *ch
 	vers, convs, pagination, cerr := s.inbox.Read(query, p)
 	if cerr != nil {
 		if _, ok := cerr.(libkb.ChatStorageMissError); !ok {
-			s.G().Log.Error("HybridInboxSource: error fetch inbox locally: %s", cerr.Error())
+			s.Debug(ctx, "Read: error fetching inbox: %s", cerr.Error())
 		}
 	} else {
-		s.G().Log.Debug("HybridInboxSource: hit local storage: uid: %s convs: %d", uid, len(convs))
+		s.Debug(ctx, "Read: hit local storage: uid: %s convs: %d", uid, len(convs))
 		finalConvs, err := s.finalizeConvs(ctx, uid, convs)
 		if err != nil {
 			return Inbox{}, nil, err
@@ -434,7 +437,7 @@ func (s *localizer) localizeConversation(ctx context.Context, uid gregor1.UID,
 			if typ == chat1.MessageType_METADATA {
 				conversationLocal.Info.TopicName = body.Metadata().ConversationTitle
 			}
-			if IsVisibleChatMessageType(typ) {
+			if utils.IsVisibleChatMessageType(typ) {
 				conversationLocal.IsEmpty = false
 			}
 
@@ -484,7 +487,7 @@ func (s *localizer) localizeConversation(ctx context.Context, uid gregor1.UID,
 		conversationLocal.Info.TlfName = info.CanonicalName
 	}
 
-	conversationLocal.Info.WriterNames, conversationLocal.Info.ReaderNames, err = ReorderParticipants(
+	conversationLocal.Info.WriterNames, conversationLocal.Info.ReaderNames, err = utils.ReorderParticipants(
 		ctx,
 		s.G().GetUPAKLoader(),
 		conversationLocal.Info.TlfName,
@@ -511,4 +514,36 @@ func (s *localizer) localizeConversation(ctx context.Context, uid gregor1.UID,
 	}
 
 	return conversationLocal
+}
+
+func GetInboxQueryLocalToRemote(ctx context.Context,
+	tlfInterface keybase1.TlfInterface, lquery *chat1.GetInboxLocalQuery) (
+	rquery *chat1.GetInboxQuery, info *TLFInfo, err error) {
+
+	if lquery == nil {
+		return nil, nil, nil
+	}
+
+	rquery = &chat1.GetInboxQuery{}
+	if lquery.TlfName != nil && len(*lquery.TlfName) > 0 {
+		var err error
+		info, err = LookupTLF(ctx, tlfInterface, *lquery.TlfName, lquery.Visibility())
+		if err != nil {
+			return nil, nil, err
+		}
+		rquery.TlfID = &info.ID
+	}
+
+	rquery.After = lquery.After
+	rquery.Before = lquery.Before
+	rquery.TlfVisibility = lquery.TlfVisibility
+	rquery.TopicType = lquery.TopicType
+	rquery.UnreadOnly = lquery.UnreadOnly
+	rquery.ReadOnly = lquery.ReadOnly
+	rquery.ComputeActiveList = lquery.ComputeActiveList
+	rquery.ConvID = lquery.ConvID
+	rquery.OneChatTypePerTLF = lquery.OneChatTypePerTLF
+	rquery.Status = lquery.Status
+
+	return rquery, info, nil
 }

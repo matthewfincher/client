@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/keybase/client/go/chat/storage"
+	"github.com/keybase/client/go/chat/utils"
 	"github.com/keybase/client/go/libkb"
 	"github.com/keybase/client/go/protocol/chat1"
 	"github.com/keybase/client/go/protocol/gregor1"
@@ -12,7 +13,7 @@ import (
 
 type Syncer struct {
 	libkb.Contextified
-	debugLabeller
+	utils.DebugLabeller
 
 	ri func() chat1.RemoteInterface
 }
@@ -20,7 +21,7 @@ type Syncer struct {
 func NewSyncer(g *libkb.GlobalContext, ri func() chat1.RemoteInterface) *Syncer {
 	return &Syncer{
 		Contextified:  libkb.NewContextified(g),
-		debugLabeller: newDebugLabeller(g, "syncer"),
+		DebugLabeller: utils.NewDebugLabeller(g, "syncer"),
 		ri:            ri,
 	}
 }
@@ -40,7 +41,7 @@ func (s *Syncer) Connected(ctx context.Context, uid gregor1.UID) error {
 	// send alerts to clients that they should refresh.
 	vers, err := s.ri().GetInboxVersion(context.Background(), uid)
 	if err != nil {
-		s.debug(ctx, "failed to sync inbox version: uid: %s error: %s", uid, err.Error())
+		s.Debug(ctx, "failed to sync inbox version: uid: %s error: %s", uid, err.Error())
 		return err
 	}
 
@@ -50,7 +51,7 @@ func (s *Syncer) Connected(ctx context.Context, uid gregor1.UID) error {
 	// If we miss here, then let's send notifications out to clients letting
 	// them know everything is hosed
 	if verr := ibox.VersionSync(vers); verr != nil {
-		s.debug(ctx, "error during version sync: %s", verr.Error())
+		s.Debug(ctx, "error during version sync: %s", verr.Error())
 		s.sendChatStaleNotifications(uid)
 	}
 
