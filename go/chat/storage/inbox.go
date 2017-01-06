@@ -411,8 +411,10 @@ func (i *Inbox) clear() libkb.ChatStorageError {
 func (i *Inbox) handleVersion(ctx context.Context, ourvers chat1.InboxVers, updatevers chat1.InboxVers) (chat1.InboxVers, bool, libkb.ChatStorageError) {
 	// Our version is at least as new as this update, let's not continue
 	if updatevers == 0 {
+		// Don't do anything to the version if we are just writing into ourselves, we'll
+		// get the correct version when Gregor bounces the update back at us
 		i.Debug(ctx, "handleVersion: received an self update: ours: %d update: %d", ourvers, updatevers)
-		return ourvers + 1, true, nil
+		return ourvers, true, nil
 	} else if ourvers >= updatevers {
 		i.Debug(ctx, "handleVersion: received an old update: ours: %d update: %d", ourvers, updatevers)
 		return ourvers, false, nil
