@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -177,10 +178,11 @@ func (i *Inbox) hashQuery(query *chat1.GetInboxLocalQuery) (queryHash, libkb.Cha
 	return hasher.Sum(nil), nil
 }
 
-func (i *Inbox) Merge(vers chat1.InboxVers, convs []chat1.ConversationLocal,
-	query *chat1.GetInboxLocalQuery, p *chat1.Pagination) libkb.ChatStorageError {
+func (i *Inbox) Merge(ctx context.Context, vers chat1.InboxVers, convs []chat1.ConversationLocal,
+	query *chat1.GetInboxLocalQuery, p *chat1.Pagination) (err libkb.ChatStorageError) {
 	i.Lock()
 	defer i.Unlock()
+	defer i.maybeNukeFn(func() libkb.ChatStorageError { return err }, i.dbKey())
 
 	i.debug("Merge: vers: %d", vers)
 
@@ -370,9 +372,10 @@ func (i *Inbox) queryExists(ibox inboxDiskData, query *chat1.GetInboxLocalQuery,
 	return false
 }
 
-func (i *Inbox) Read(query *chat1.GetInboxLocalQuery, p *chat1.Pagination) (chat1.InboxVers, []chat1.ConversationLocal, *chat1.Pagination, libkb.ChatStorageError) {
+func (i *Inbox) Read(query *chat1.GetInboxLocalQuery, p *chat1.Pagination) (vers chat1.InboxVers, res []chat1.ConversationLocal, pagination *chat1.Pagination, err libkb.ChatStorageError) {
 	i.Lock()
 	defer i.Unlock()
+	defer i.maybeNukeFn(func() libkb.ChatStorageError { return err }, i.dbKey())
 
 	ibox, err := i.readDiskInbox()
 	if err != nil {
@@ -386,8 +389,8 @@ func (i *Inbox) Read(query *chat1.GetInboxLocalQuery, p *chat1.Pagination) (chat
 	}
 
 	// Apply query and pagination
-	res := i.applyQuery(query, ibox.Conversations)
-	res, pagination, err := i.applyPagination(ibox.Conversations, p)
+	res = i.applyQuery(query, ibox.Conversations)
+	res, pagination, err = i.applyPagination(ibox.Conversations, p)
 	if err != nil {
 		return 0, nil, nil, err
 	}
@@ -422,9 +425,10 @@ func (i *Inbox) handleVersion(ourvers chat1.InboxVers, updatevers chat1.InboxVer
 	return ourvers, false, i.clear()
 }
 
-func (i *Inbox) NewConversation(vers chat1.InboxVers, conv chat1.ConversationLocal) error {
+func (i *Inbox) NewConversation(vers chat1.InboxVers, conv chat1.ConversationLocal) (err libkb.ChatStorageError) {
 	i.Lock()
 	defer i.Unlock()
+	defer i.maybeNukeFn(func() libkb.ChatStorageError { return err }, i.dbKey())
 
 	i.debug("NewConversation: vers: %d convID: %s", vers, conv.Info.Id)
 	ibox, err := i.readDiskInbox()
@@ -481,9 +485,10 @@ func (i *Inbox) getConv(convID chat1.ConversationID, convs []chat1.ConversationL
 	return index, &convs[index]
 }
 
-func (i *Inbox) NewMessage(vers chat1.InboxVers, convID chat1.ConversationID, msg chat1.MessageUnboxed) libkb.ChatStorageError {
+func (i *Inbox) NewMessage(vers chat1.InboxVers, convID chat1.ConversationID, msg chat1.MessageUnboxed) (err libkb.ChatStorageError) {
 	i.Lock()
 	defer i.Unlock()
+	defer i.maybeNukeFn(func() libkb.ChatStorageError { return err }, i.dbKey())
 
 	i.debug("NewMessage: vers: %d convID: %s", vers, convID)
 	ibox, err := i.readDiskInbox()
@@ -536,9 +541,10 @@ func (i *Inbox) NewMessage(vers chat1.InboxVers, convID chat1.ConversationID, ms
 	return nil
 }
 
-func (i *Inbox) ReadMessage(vers chat1.InboxVers, convID chat1.ConversationID, msgID chat1.MessageID) libkb.ChatStorageError {
+func (i *Inbox) ReadMessage(vers chat1.InboxVers, convID chat1.ConversationID, msgID chat1.MessageID) (err libkb.ChatStorageError) {
 	i.Lock()
 	defer i.Unlock()
+	defer i.maybeNukeFn(func() libkb.ChatStorageError { return err }, i.dbKey())
 
 	i.debug("ReadMessage: vers: %d convID: %s", vers, convID)
 	ibox, err := i.readDiskInbox()
@@ -572,9 +578,10 @@ func (i *Inbox) ReadMessage(vers chat1.InboxVers, convID chat1.ConversationID, m
 	return nil
 }
 
-func (i *Inbox) SetStatus(vers chat1.InboxVers, convID chat1.ConversationID, status chat1.ConversationStatus) libkb.ChatStorageError {
+func (i *Inbox) SetStatus(vers chat1.InboxVers, convID chat1.ConversationID, status chat1.ConversationStatus) (err libkb.ChatStorageError) {
 	i.Lock()
 	defer i.Unlock()
+	defer i.maybeNukeFn(func() libkb.ChatStorageError { return err }, i.dbKey())
 
 	i.debug("SetStatus: vers: %d convID: %s", vers, convID)
 	ibox, err := i.readDiskInbox()
@@ -608,9 +615,10 @@ func (i *Inbox) SetStatus(vers chat1.InboxVers, convID chat1.ConversationID, sta
 }
 
 func (i *Inbox) TlfFinalize(vers chat1.InboxVers, convIDs []chat1.ConversationID,
-	finalizeInfo chat1.ConversationFinalizeInfo) libkb.ChatStorageError {
+	finalizeInfo chat1.ConversationFinalizeInfo) (err libkb.ChatStorageError) {
 	i.Lock()
 	defer i.Unlock()
+	defer i.maybeNukeFn(func() libkb.ChatStorageError { return err }, i.dbKey())
 
 	i.debug("TlfFinalize: vers: %d convIDs: %v finalizeInfo: %v", vers, convIDs, finalizeInfo)
 	ibox, err := i.readDiskInbox()
@@ -639,6 +647,30 @@ func (i *Inbox) TlfFinalize(vers chat1.InboxVers, convIDs []chat1.ConversationID
 	ibox.InboxVersion = vers
 	if err := i.writeDiskInbox(ibox); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+func (i *Inbox) VersionSync(vers chat1.InboxVers) (err libkb.ChatStorageError) {
+	i.Lock()
+	defer i.Unlock()
+	defer i.maybeNukeFn(func() libkb.ChatStorageError { return err }, i.dbKey())
+
+	ibox, err := i.readDiskInbox()
+	if err != nil {
+		if _, ok := err.(libkb.ChatStorageMissError); !ok {
+			return err
+		}
+		return nil
+	}
+
+	// If the versions don't match here, we just clear the inbox for the user
+	if ibox.InboxVersion != vers {
+		if err = i.clear(); err != nil {
+			return err
+		}
+		return libkb.NewChatStorageVersionMismatchError(ibox.InboxVersion, vers)
 	}
 
 	return nil

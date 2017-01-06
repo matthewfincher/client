@@ -254,3 +254,19 @@ func IsVisibleChatMessageType(messageType chat1.MessageType) bool {
 	}
 	return false
 }
+
+type debugLabeller struct {
+	libkb.Contextified
+	label string
+}
+
+func newDebugLabeller(g *libkb.GlobalContext, label string) debugLabeller {
+	return debugLabeller{
+		Contextified: libkb.NewContextified(g),
+		label:        label,
+	}
+}
+
+func (d debugLabeller) debug(ctx context.Context, msg string, args ...interface{}) {
+	d.G().Log.CDebugf(ctx, d.label+": "+msg, args...)
+}

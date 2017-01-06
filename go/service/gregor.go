@@ -111,6 +111,7 @@ type gregorHandler struct {
 	freshReplay      bool
 
 	identNotifier *chat.IdentifyNotifier
+	chatSync      *chat.Syncer
 
 	transportForTesting *connTransport
 
@@ -153,6 +154,8 @@ func newGregorHandler(g *libkb.GlobalContext) (*gregorHandler, error) {
 		badger:          nil,
 		identNotifier:   chat.NewIdentifyNotifier(g),
 	}
+	gh.chatSync =
+		chat.NewSyncer(g, func() chat1.RemoteInterface { return chat1.RemoteClient{Cli: gh.cli} })
 
 	// Attempt to create a gregor client initially, if we are not logged in
 	// or don't have user/device info in G, then this won't work
@@ -486,14 +489,20 @@ func (g *gregorHandler) OnConnect(ctx context.Context, conn *rpc.Connection,
 			len(replayedMsgs), len(consumedMsgs))
 	}
 
+	// Sync chat data using a Syncer object
+	gcli, err := g.getGregorCli()
+	if err == nil {
+		if err := g.chatSync.Connected(ctx, gcli.User.(gregor1.UID)); err != nil {
+			return err
+		}
+	}
+
+	// Sync badge state in the background
 	if g.badger != nil {
 		go func(badger *Badger) {
 			badger.Resync(context.Background(), &chat1.RemoteClient{Cli: g.cli})
 		}(g.badger)
 	}
-
-	// Let the Deliverer know that we are back online
-	g.G().MessageDeliverer.Connected()
 
 	// Broadcast reconnect oobm. Spawn this off into a goroutine so that we don't delay
 	// reconnection any longer than we have to.
@@ -510,7 +519,9 @@ func (g *gregorHandler) OnConnectError(err error, reconnectThrottleDuration time
 
 func (g *gregorHandler) OnDisconnected(ctx context.Context, status rpc.DisconnectStatus) {
 	g.Debug("disconnected: %v", status)
-	g.G().MessageDeliverer.Disconnected()
+
+	// Alert chat syncer that we are now disconnected
+	g.chatSync.Disconnected(ctx)
 }
 
 func (g *gregorHandler) OnDoCommandError(err error, nextTime time.Duration) {
@@ -818,15 +829,6 @@ func (h IdentifyUIHandler) handleShowTrackerPopupDismiss(ctx context.Context, cl
 	return nil
 }
 
-func (g *gregorHandler) sendChatStaleNotifications() {
-
-	// Alert Electron that all chat information could be out of date. Empty conversation ID
-	// list means everything needs to be refreshed
-	uid := keybase1.UID(g.gregorCli.User.String())
-	g.G().NotifyRouter.HandleChatInboxStale(context.Background(), uid)
-	g.G().NotifyRouter.HandleChatThreadsStale(context.Background(), uid, []chat1.ConversationID{})
-}
-
 func (g *gregorHandler) handleOutOfBandMessage(ctx context.Context, obm gregor.OutOfBandMessage) error {
 	g.Debug("handleOutOfBand: %+v", obm)
 
@@ -849,7 +851,6 @@ func (g *gregorHandler) handleOutOfBandMessage(ctx context.Context, obm gregor.O
 		return g.chatTlfFinalize(ctx, obm)
 	case "internal.reconnect":
 		g.G().Log.Debug("reconnected to push server")
-		g.sendChatStaleNotifications()
 		return nil
 	default:
 		return fmt.Errorf("unhandled system: %s", obm.System())
